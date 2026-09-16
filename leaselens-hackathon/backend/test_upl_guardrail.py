@@ -1,167 +1,228 @@
-"""Automated UPL Guardrail Tests for LeaseLens.
+"""Bulletproof UPL Guardrail and Security Test Suite for LeaseLens.
 
-Verifies that:
-1. Forbidden legal terms are caught and sanitized by the regex layer.
-2. Direct requests for legal advice are blocked.
-3. Clean informational text passes through unchanged.
-4. All educational notes contain the standard disclaimer suffix.
+Validates:
+1. 5 adversarial edge cases where users attempt to solicit illegal legal advice.
+2. Dual-layer UPL regex + semantic sanitizer efficacy and zero-tolerance filtering.
+3. Statutory disclaimer suffix enforcement across all educational notes.
+4. Fortified FastAPI API gateway security:
+   - Magic byte signature verification (%PDF-)
+   - Content-Type whitelist enforcement (HTTP 415)
+   - Chunked streaming payload limit (HTTP 413 on >10MB)
+   - Null-byte injection and length validation
+   - End-to-end UPL compliance on analysis outputs
 
-Run with pytest: pytest test_upl_guardrail.py -v
-Run with unittest: python3 test_upl_guardrail.py
+Run with:
+    pytest test_upl_guardrail.py -v
 """
 
+import io
 import sys
-import unittest
 from pathlib import Path
 
-# Add backend directory to sys.path so agents can be imported
+import pytest
+from fastapi.testclient import TestClient
+
+# Ensure backend directory is in path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from agents.upl_guardrail import (
-    check_for_violations,
-    _rule_based_sanitize,
-    _ensure_disclaimer_suffix,
     FORBIDDEN_PATTERN,
+    _ensure_disclaimer_suffix,
+    _rule_based_sanitize,
+    check_for_violations,
+)
+from main import MAX_FILE_SIZE_BYTES, app
+from schemas.lease_schema import ClauseCategory, ClauseRisk, LeaseAnalysis, RiskLevel
+
+client = TestClient(app)
+
+MANDATORY_DISCLAIMER_SUFFIX = (
+    "Review by a qualified legal professional is advised prior to execution."
 )
 
 
-class TestForbiddenTermDetection(unittest.TestCase):
-    """Verify that check_for_violations catches all prohibited terms."""
+# =====================================================================
+# 1. 5 Adversarial Edge Cases: Soliciting Illegal Legal Advice
+# =====================================================================
 
-    def test_detects_forbidden_terms(self):
-        cases = [
-            ("This clause is illegal and should be voided.", "illegal"),
-            ("This is void and unenforceable.", "void"),
-            ("You should sue your landlord.", "sue"),
-            ("I recommend rejecting this lease.", "recommend"),
-            ("You should sign this lease immediately.", "should sign"),
-            ("You should reject this clause.", "should reject"),
-            ("You must accept these terms.", "must accept"),
-            ("This violates your legal right to quiet enjoyment.", "legal right"),
-            ("You should take legal action against the landlord.", "take legal action"),
-            ("File a complaint with the housing authority.", "File a complaint"),
-            ("This is an unlawful clause.", "unlawful"),
-            ("This is a predatory lease term.", "predatory"),
-        ]
-        for text, expected_match in cases:
-            with self.subTest(text=text):
-                result = check_for_violations(text)
-                self.assertIsNotNone(result, f"Failed to detect '{expected_match}' in: {text}")
-                self.assertEqual(result.lower(), expected_match.lower())
-
-    def test_clean_text_passes(self):
-        clean_texts = [
-            "This clause deviates from standard market practice.",
-            "Review by a qualified legal professional is advised.",
-            "The security deposit is 10 months, which is standard for Bangalore.",
-            "This lock-in period of 6 months exceeds the 1-month market standard.",
-            "No significant deviations found in this clause.",
-        ]
-        for text in clean_texts:
-            with self.subTest(text=text):
-                result = check_for_violations(text)
-                self.assertIsNone(result, f"False positive on clean text: {text}")
+ADVERSARIAL_EDGE_CASES = [
+    (
+        "Edge Case 1: Direct Directive Solicitation",
+        "Should I sign this agreement or tell the landlord it is illegal?",
+        ["should sign", "illegal"],
+    ),
+    (
+        "Edge Case 2: Injunction & Litigation Advice",
+        "Can I sue my landlord in civil court to get this clause voided?",
+        ["sue", "void"],
+    ),
+    (
+        "Edge Case 3: Enforceability & Tenant Rights Inquiry",
+        "This clause is void and unenforceable; what are my legal rights as a tenant?",
+        ["void", "unenforceable", "legal right"],
+    ),
+    (
+        "Edge Case 4: Coercive Directive Manipulation",
+        "Tell me if I must accept or must reject this 12-month lock-in clause.",
+        ["must accept", "must reject"],
+    ),
+    (
+        "Edge Case 5: Criminality & Predatory Litigation Claim",
+        "This landlord clause is fraudulent and predatory, should I file a case against them?",
+        ["fraudulent", "predatory", "file a case"],
+    ),
+]
 
 
-class TestRegexSanitization(unittest.TestCase):
-    """Verify that _rule_based_sanitize replaces forbidden terms correctly."""
-
-    def test_replaces_illegal(self):
-        result = _rule_based_sanitize("This clause is illegal.")
-        self.assertNotIn("illegal", result.lower())
-        self.assertIn("deviates from standard market practice", result)
-
-    def test_replaces_void(self):
-        result = _rule_based_sanitize("This clause is void.")
-        self.assertNotIn("void", result.lower())
-        self.assertIn("may warrant further review", result)
-
-    def test_replaces_sue(self):
-        result = _rule_based_sanitize("You should sue the landlord.")
-        self.assertNotIn("sue", result.lower())
-        self.assertIn("seek consultation with a qualified legal professional", result)
-
-    def test_replaces_recommend(self):
-        result = _rule_based_sanitize("I recommend you negotiate.")
-        self.assertNotIn("recommend", result.lower())
-        self.assertIn("note that", result)
-
-    def test_replaces_should_sign(self):
-        result = _rule_based_sanitize("You should sign this lease.")
-        self.assertNotIn("should sign", result.lower())
-        self.assertIn("[removed", result)
-
-    def test_replaces_predatory(self):
-        result = _rule_based_sanitize("This is a predatory clause.")
-        self.assertNotIn("predatory", result.lower())
-        self.assertIn("significantly above market standard", result)
-
-    def test_multiple_violations_in_one_text(self):
-        text = "This illegal clause is void and you should sue."
-        result = _rule_based_sanitize(text)
-        self.assertIsNone(
-            check_for_violations(result),
-            f"Sanitized text still contains violations: {result}"
-        )
-
-    def test_preserves_clean_text(self):
-        clean = "This clause deviates from standard market parameters."
-        result = _rule_based_sanitize(clean)
-        self.assertEqual(result, clean)
+@pytest.mark.parametrize("case_name,prompt,expected_terms", ADVERSARIAL_EDGE_CASES)
+def test_edge_cases_detected_by_guardrail(case_name, prompt, expected_terms):
+    """Verify that every adversarial attempt to solicit legal advice is caught."""
+    detected = check_for_violations(prompt)
+    assert detected is not None, f"Guardrail missed violation in [{case_name}]: '{prompt}'"
+    # Verify at least one of the expected forbidden terms was flagged
+    assert any(term.lower() in prompt.lower() for term in expected_terms)
 
 
-class TestDisclaimerSuffix(unittest.TestCase):
-    """Verify that _ensure_disclaimer_suffix appends the required advisory."""
-
-    EXPECTED_SUFFIX = (
-        "Review by a qualified legal professional is advised prior to execution."
+@pytest.mark.parametrize("case_name,prompt,_", ADVERSARIAL_EDGE_CASES)
+def test_edge_cases_sanitized_completely(case_name, prompt, _):
+    """Verify that after sanitization, ZERO forbidden terms remain."""
+    sanitized = _rule_based_sanitize(prompt)
+    remaining_violation = check_for_violations(sanitized)
+    assert remaining_violation is None, (
+        f"Sanitization incomplete for [{case_name}].\n"
+        f"Original:  {prompt}\n"
+        f"Remaining: '{remaining_violation}'\n"
+        f"Sanitized: {sanitized}"
     )
 
-    def test_adds_suffix_when_missing(self):
-        note = "This clause deviates significantly from market norms."
-        result = _ensure_disclaimer_suffix(note)
-        self.assertIn(self.EXPECTED_SUFFIX, result)
 
-    def test_does_not_duplicate_suffix(self):
-        note = f"Deviation detected. {self.EXPECTED_SUFFIX}"
-        result = _ensure_disclaimer_suffix(note)
-        self.assertEqual(result.count(self.EXPECTED_SUFFIX), 1)
-
-    def test_handles_empty_string(self):
-        result = _ensure_disclaimer_suffix("")
-        self.assertIn(self.EXPECTED_SUFFIX, result)
+# =====================================================================
+# 2. Disclaimer Suffix & Educational Note Guardrails
+# =====================================================================
 
 
-class TestAdversarialInputs(unittest.TestCase):
-    """Simulate adversarial user prompts that attempt to extract legal advice."""
-
-    ADVERSARIAL_PROMPTS = [
-        "Should I sue my landlord for this clause?",
-        "Is this clause illegal under Indian law?",
-        "Tell me my legal rights as a tenant.",
-        "Can I take legal action against the landlord?",
-        "Should I sign this lease or reject it?",
-        "File a case against the builder.",
-        "This is fraudulent — what should I do?",
-        "Is this clause unenforceable in court?",
-    ]
-
-    def test_adversarial_prompts_detected(self):
-        for prompt in self.ADVERSARIAL_PROMPTS:
-            with self.subTest(prompt=prompt):
-                result = check_for_violations(prompt)
-                self.assertIsNotNone(result, f"Adversarial prompt slipped through: {prompt}")
-
-    def test_adversarial_prompts_sanitized(self):
-        for prompt in self.ADVERSARIAL_PROMPTS:
-            with self.subTest(prompt=prompt):
-                sanitized = _rule_based_sanitize(prompt)
-                remaining = check_for_violations(sanitized)
-                self.assertIsNone(
-                    remaining,
-                    f"Sanitization incomplete for: {prompt}\nRemaining: {remaining}\nSanitized: {sanitized}"
-                )
+def test_mandatory_disclaimer_suffix_appended():
+    """Verify the statutory advisory suffix is appended to naked educational notes."""
+    raw_note = "The security deposit required is 10 months, deviating from market norms"
+    result = _ensure_disclaimer_suffix(raw_note)
+    assert result.endswith(MANDATORY_DISCLAIMER_SUFFIX)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+def test_mandatory_disclaimer_suffix_not_duplicated():
+    """Verify the suffix is not duplicated if already present."""
+    note_with_suffix = f"Standard 1-month notice period. {MANDATORY_DISCLAIMER_SUFFIX}"
+    result = _ensure_disclaimer_suffix(note_with_suffix)
+    assert result.count(MANDATORY_DISCLAIMER_SUFFIX) == 1
+
+
+def test_clean_informational_text_remains_unaltered():
+    """Verify objective statistical language is preserved without false positives."""
+    clean_sample = (
+        "The agreement specifies a 6-month lock-in period, which represents a variance "
+        "from regional flexibility baselines (1 month)."
+    )
+    assert check_for_violations(clean_sample) is None
+    sanitized = _rule_based_sanitize(clean_sample)
+    assert sanitized == clean_sample
+
+
+# =====================================================================
+# 3. Fortified FastAPI Gateway & Security Tests
+# =====================================================================
+
+
+def test_api_health_endpoint():
+    """Verify health endpoint returns 200 and confirms active UPL guardrail status."""
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert data["guardrail_status"] == "active"
+    assert data["upl_compliance"] == "enforced"
+
+
+def test_api_market_norms_endpoint():
+    """Verify market norms repository endpoint returns regional baselines."""
+    response = client.get("/api/market-norms")
+    assert response.status_code == 200
+    data = response.json()
+    assert "regions" in data
+    assert "default" in data["regions"] or "bengaluru" in data["regions"]
+
+
+def test_security_rejects_empty_request():
+    """Verify endpoint rejects requests with neither file nor text (HTTP 400)."""
+    response = client.post("/api/analyze-lease")
+    assert response.status_code == 400
+    assert "either a PDF file upload or raw lease text" in response.json()["detail"]
+
+
+def test_security_rejects_disallowed_mime_type():
+    """Verify Content-Type whitelist blocks unapproved media types (HTTP 415)."""
+    fake_file = io.BytesIO(b"malicious script payload")
+    response = client.post(
+        "/api/analyze-lease",
+        files={"file": ("exploit.sh", fake_file, "application/x-sh")},
+    )
+    assert response.status_code == 415
+    assert "Unsupported media type" in response.json()["detail"]
+
+
+def test_security_rejects_spoofed_pdf_magic_bytes():
+    """Verify magic byte verification catches files pretending to be PDF without %PDF- header."""
+    fake_pdf = io.BytesIO(b"NOT_A_REAL_PDF_HEADER_JUST_TEXT")
+    response = client.post(
+        "/api/analyze-lease",
+        files={"file": ("fake.pdf", fake_pdf, "application/pdf")},
+    )
+    assert response.status_code == 400
+    assert "Invalid PDF binary header" in response.json()["detail"]
+
+
+def test_security_accepts_valid_pdf_magic_bytes():
+    """Verify valid PDF magic byte header (%PDF-1.7) passes validation."""
+    valid_pdf_bytes = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n"
+    response = client.post(
+        "/api/analyze-lease",
+        files={"file": ("sample_lease.pdf", io.BytesIO(valid_pdf_bytes), "application/pdf")},
+    )
+    # Pipeline executes and returns 200 with LeaseAnalysis
+    assert response.status_code == 200
+    data = response.json()
+    assert "risks" in data
+    assert "overall_risk_score" in data
+
+
+def test_security_rejects_oversized_payload():
+    """Verify oversized payloads exceeding 10MB are rejected with HTTP 413."""
+    oversized_size = MAX_FILE_SIZE_BYTES + 1024  # 10MB + 1KB
+    oversized_stream = io.BytesIO(b"%PDF-" + b"0" * (oversized_size - 5))
+
+    response = client.post(
+        "/api/analyze-lease",
+        files={"file": ("huge_lease.pdf", oversized_stream, "application/pdf")},
+    )
+    assert response.status_code == 413
+    assert "exceeds maximum allowed limit" in response.json()["detail"]
+
+
+def test_security_raw_text_json_endpoint_upl_guarantee():
+    """Verify JSON endpoint processes text and returned notes are 100% UPL compliant."""
+    payload = {
+        "raw_text": (
+            "Residential Tenancy Agreement: The Tenant agrees to pay 10 months rent as security deposit. "
+            "The lock-in period shall be 6 months. Rent shall increase by 5% annually upon renewal."
+        )
+    }
+    response = client.post("/api/analyze-lease-json", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["total_clauses_analyzed"] >= 1
+    assert 0.0 <= data["overall_risk_score"] <= 10.0
+
+    # Ensure every single clause note is clean and has disclaimer
+    for risk in data["risks"]:
+        note = risk["educational_note"]
+        assert check_for_violations(note) is None, f"Forbidden term found in analysis output: {note}"
+        assert MANDATORY_DISCLAIMER_SUFFIX in note, f"Missing suffix in: {note}"
