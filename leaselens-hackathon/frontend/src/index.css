@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-surface text-gray-100 font-sans antialiased;
+    min-height: 100vh;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-surface;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-elevated rounded-full;
+  }
+
+  ::selection {
+    @apply bg-accent-primary/30 text-white;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-surface-card/80 backdrop-blur-xl border border-white/5 
+           rounded-2xl shadow-2xl shadow-black/20;
+  }
+
+  .risk-badge {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full 
+           text-xs font-semibold uppercase tracking-wider;
+  }
+
+  .risk-badge-low {
+    @apply risk-badge bg-risk-low/15 text-risk-low border border-risk-low/20;
+  }
+
+  .risk-badge-moderate {
+    @apply risk-badge bg-risk-moderate/15 text-risk-moderate border border-risk-moderate/20;
+  }
+
+  .risk-badge-high {
+    @apply risk-badge bg-risk-high/15 text-risk-high border border-risk-high/20;
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-accent-primary to-accent-secondary 
+           bg-clip-text text-transparent;
+  }
+
+  .glow-border {
+    @apply relative;
+  }
+
+  .glow-border::before {
+    content: '';
+    @apply absolute -inset-px rounded-2xl bg-gradient-to-r 
+           from-accent-primary/20 to-accent-secondary/20 -z-10 blur-sm;
+  }
+}
