@@ -12,7 +12,7 @@ export default defineConfig({
     },
   },
   build: {
-    target: 'baseline-widely-available',
+    target: 'es2022',
     minify: 'terser',
     terserOptions: {
       compress: {

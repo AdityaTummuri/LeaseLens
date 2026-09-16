@@ -10,10 +10,23 @@ Configured with read-only CapabilitiesConfig to prevent arbitrary execution.
 import re
 from typing import Optional
 
-from google.antigravity import Agent, LocalAgentConfig
-from google.antigravity.types import CapabilitiesConfig, BuiltinTools
+try:
+    from google.antigravity import Agent, LocalAgentConfig
+    from google.antigravity.types import CapabilitiesConfig, BuiltinTools
+except ImportError:
+    Agent = None
+    LocalAgentConfig = None
+    CapabilitiesConfig = None
+    BuiltinTools = None
 
-from schemas.lease_schema import LeaseAnalysis, ClauseRisk
+try:
+    from schemas.lease_schema import LeaseAnalysis, ClauseRisk
+except ImportError:
+    try:
+        from backend.schemas.lease_schema import LeaseAnalysis, ClauseRisk
+    except ImportError:
+        LeaseAnalysis = None
+        ClauseRisk = None
 
 # Forbidden terms that indicate legal advice
 FORBIDDEN_TERMS = [
@@ -22,16 +35,16 @@ FORBIDDEN_TERMS = [
     r"\bunenforceable\b",
     r"\bsue\b",
     r"\brecommend\b",
-    r"\bshould sign\b",
-    r"\bshould reject\b",
-    r"\bshould not sign\b",
-    r"\bmust accept\b",
-    r"\bmust reject\b",
-    r"\blegal right\b",
-    r"\byour rights\b",
-    r"\btake legal action\b",
-    r"\bfile a complaint\b",
-    r"\bfile a case\b",
+    r"\bshould(?:\s+\w+)?\s+sign\b",
+    r"\bshould(?:\s+\w+)?\s+reject\b",
+    r"\bshould\s+not\s+sign\b",
+    r"\bmust\s+accept\b",
+    r"\bmust\s+reject\b",
+    r"\blegal\s+rights?\b",
+    r"\byour\s+rights\b",
+    r"\btake\s+legal\s+action\b",
+    r"\bfile\s+a\s+complaint\b",
+    r"\bfile\s+a\s+case\b",
     r"\bunlawful\b",
     r"\bfraudulent\b",
     r"\bpredatory\b",
@@ -89,20 +102,20 @@ def _rule_based_sanitize(text: str) -> str:
         r"\bvoid\b": "may warrant further review",
         r"\bunenforceable\b": "uncommon in standard agreements",
         r"\bsue\b": "seek consultation with a qualified legal professional",
-        r"\btake legal action\b": "seek consultation with a qualified legal professional",
-        r"\bfile a complaint\b": "seek consultation with a qualified legal professional",
-        r"\bfile a case\b": "seek consultation with a qualified legal professional",
+        r"\btake\s+legal\s+action\b": "seek consultation with a qualified legal professional",
+        r"\bfile\s+a\s+complaint\b": "seek consultation with a qualified legal professional",
+        r"\bfile\s+a\s+case\b": "seek consultation with a qualified legal professional",
         r"\brecommend\b": "note that",
-        r"\bshould sign\b": "[removed — no directive provided]",
-        r"\bshould reject\b": "[removed — no directive provided]",
-        r"\bshould not sign\b": "[removed — no directive provided]",
-        r"\bmust accept\b": "[removed — no directive provided]",
-        r"\bmust reject\b": "[removed — no directive provided]",
+        r"\bshould(?:\s+\w+)?\s+sign\b": "[removed — no directive provided]",
+        r"\bshould(?:\s+\w+)?\s+reject\b": "[removed — no directive provided]",
+        r"\bshould\s+not\s+sign\b": "[removed — no directive provided]",
+        r"\bmust\s+accept\b": "[removed — no directive provided]",
+        r"\bmust\s+reject\b": "[removed — no directive provided]",
         r"\bpredatory\b": "significantly above market standard",
         r"\bunlawful\b": "deviates from standard market practice",
         r"\bfraudulent\b": "requires independent verification",
-        r"\blegal right\b": "standard market expectation",
-        r"\byour rights\b": "standard market expectations",
+        r"\blegal\s+rights?\b": "standard market expectation",
+        r"\byour\s+rights\b": "standard market expectations",
     }
     for pattern, replacement in replacements.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
