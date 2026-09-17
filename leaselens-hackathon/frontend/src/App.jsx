@@ -4,7 +4,10 @@ import FileUpload from './components/FileUpload';
 import HeatmapView from './components/HeatmapView';
 import LoadingSpinner from './components/LoadingSpinner';
 
-const API_URL = '/api/analyze-lease';
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  'https://leaselens-backend-856255401692.us-central1.run.app';
+const API_URL = `${API_BASE_URL}/api/analyze-lease`;
 
 export default function App() {
   const [analysis, setAnalysis] = useState(null);
