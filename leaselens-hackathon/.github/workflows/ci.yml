@@ -1,0 +1,86 @@
+name: LeaseLens CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    name: Backend Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    defaults:
+      run:
+        working-directory: leaselens-hackathon/backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        run: |
+          python -m pytest -v --cov=. --cov-report=term-missing --tb=short
+
+      - name: Lint with Ruff
+        run: |
+          ruff check . --output-format=github
+
+  frontend-build:
+    name: Frontend Build Verification
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: leaselens-hackathon/frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: leaselens-hackathon/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Verify build output exists
+        run: |
+          test -d dist && echo "✅ Build output verified" || exit 1
+
+  repo-size-check:
+    name: Repository Size Guard (<10MB)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check repo size
+        run: |
+          SIZE=$(du -sb --exclude='.git' --exclude='node_modules' . | cut -f1)
+          SIZE_MB=$(echo "scale=2; $SIZE / 1048576" | bc)
+          echo "📏 Repository size: ${SIZE_MB}MB"
+          if (( $(echo "$SIZE_MB > 10" | bc -l) )); then
+            echo "❌ FAIL: Repository exceeds 10MB limit!"
+            exit 1
+          fi
+          echo "✅ PASS: Repository within 10MB limit"

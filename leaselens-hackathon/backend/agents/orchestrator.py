@@ -12,6 +12,7 @@ Implements automatic retry loops for schema validation failures.
 """
 
 import logging
+import time
 from typing import List, Optional
 
 from schemas.lease_schema import LeaseAnalysis
@@ -87,8 +88,11 @@ async def analyze_lease(
     if not pdf_bytes and not raw_text:
         raise ValueError("Either pdf_bytes or raw_text must be provided.")
 
+    pipeline_start = time.perf_counter()
+
     # --- Step 1: Document Ingestion ---
     logger.info("Step 1/3: Document Ingestion — extracting text...")
+    stage_start = time.perf_counter()
     
     last_error: Optional[Exception] = None
     normalized_text = ""
@@ -101,8 +105,11 @@ async def analyze_lease(
                 normalized_text = await extract_text_from_raw(raw_text)
 
             if normalized_text and len(normalized_text.strip()) > 50:
+                stage_elapsed = (time.perf_counter() - stage_start) * 1000
                 logger.info(
-                    f"Ingestion complete: {len(normalized_text)} chars extracted."
+                    "Ingestion complete: %d chars extracted (%.1fms)",
+                    len(normalized_text),
+                    stage_elapsed,
                 )
                 break
             else:
@@ -123,9 +130,10 @@ async def analyze_lease(
 
     # --- Step 2: Chunking & Classification ---
     logger.info("Step 2/3: Clause Classification — chunking and analyzing...")
+    stage_start = time.perf_counter()
 
     chunks = chunk_text(normalized_text)
-    logger.info(f"Document split into {len(chunks)} overlapping chunks.")
+    logger.info("Document split into %d overlapping chunks.", len(chunks))
 
     analysis: Optional[LeaseAnalysis] = None
 
@@ -134,9 +142,11 @@ async def analyze_lease(
             analysis = await classify_lease_text(normalized_text, chunks)
             # Validate the output
             _ = analysis.model_dump()
+            stage_elapsed = (time.perf_counter() - stage_start) * 1000
             logger.info(
-                f"Classification complete: {analysis.total_clauses_analyzed} "
-                "clauses identified."
+                "Classification complete: %d clauses identified (%.1fms)",
+                analysis.total_clauses_analyzed,
+                stage_elapsed,
             )
             break
         except Exception as e:
@@ -152,11 +162,16 @@ async def analyze_lease(
 
     # --- Step 3: UPL Sanitization ---
     logger.info("Step 3/3: UPL Guardrail — sanitizing output...")
+    stage_start = time.perf_counter()
 
     for attempt in range(MAX_RETRIES):
         try:
             sanitized = await sanitize_analysis(analysis)
-            logger.info("UPL sanitization complete. Pipeline finished successfully.")
+            pipeline_elapsed = (time.perf_counter() - pipeline_start) * 1000
+            logger.info(
+                "UPL sanitization complete. Pipeline finished in %.1fms",
+                pipeline_elapsed,
+            )
             return sanitized
         except Exception as e:
             last_error = e

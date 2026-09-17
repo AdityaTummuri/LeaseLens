@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
 
@@ -31,8 +32,9 @@ from schemas.lease_schema import ClauseCategory, ClauseRisk, LeaseAnalysis, Risk
 _NORMS_PATH = Path(__file__).parent.parent / "data" / "market_norms.json"
 
 
+@lru_cache(maxsize=1)
 def _load_market_norms() -> dict:
-    """Load regional market baselines from JSON."""
+    """Load and cache regional market baselines from JSON (read once, cached in memory)."""
     with open(_NORMS_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 

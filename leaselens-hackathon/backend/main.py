@@ -14,12 +14,15 @@ All endpoints enforce strict UPL guardrails and return informational data only.
 
 import logging
 import os
+import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
@@ -94,6 +97,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# GZip compression for all responses > 500 bytes (~60-70% reduction)
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
 # CORS configuration supporting local development and dynamic Vercel deployments
 app.add_middleware(
     CORSMiddleware,
@@ -109,6 +115,26 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def request_timing_middleware(request: Request, call_next):
+    """Log request processing time and assign tracking ID for observability."""
+    request_id = str(uuid.uuid4())[:8]
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    logger.info(
+        "[%s] %s %s → %d (%.1fms)",
+        request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        elapsed_ms,
+    )
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
+    return response
 
 
 @app.get("/", tags=["System"])
