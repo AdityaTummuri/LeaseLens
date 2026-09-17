@@ -10,17 +10,13 @@ Run with:
     pytest test_classifier.py -v
 """
 
-import json
 import sys
 from pathlib import Path
-
-import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from agents.classifier import _heuristic_classify_clauses, _load_market_norms
 from schemas.lease_schema import ClauseCategory, RiskLevel
-
 
 # =====================================================================
 # 1. Market Norms Loading

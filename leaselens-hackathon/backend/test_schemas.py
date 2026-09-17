@@ -17,13 +17,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from pydantic import ValidationError
+
 from schemas.lease_schema import (
     ClauseCategory,
     ClauseRisk,
     LeaseAnalysis,
     RiskLevel,
 )
-
 
 # =====================================================================
 # 1. RiskLevel Enum Tests
@@ -108,7 +109,7 @@ class TestClauseRiskModel:
 
     def test_clause_risk_rejects_empty_extracted_text(self):
         """extracted_text must have min_length=1; empty string rejected."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ClauseRisk(
                 category=ClauseCategory.SUBLETTING,
                 extracted_text="",
@@ -168,7 +169,7 @@ class TestLeaseAnalysisModel:
 
     def test_risk_score_lower_bound(self):
         """overall_risk_score must reject negative values."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             LeaseAnalysis(
                 document_summary="Test.",
                 total_clauses_analyzed=0,
@@ -178,7 +179,7 @@ class TestLeaseAnalysisModel:
 
     def test_risk_score_upper_bound(self):
         """overall_risk_score must reject values above 10.0."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             LeaseAnalysis(
                 document_summary="Test.",
                 total_clauses_analyzed=0,

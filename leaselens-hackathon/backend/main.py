@@ -12,12 +12,15 @@ Provides high-security endpoints for residential lease analysis:
 All endpoints enforce strict UPL guardrails and return informational data only.
 """
 
+import json
 import logging
 import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Optional
+from functools import lru_cache
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
@@ -25,6 +28,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
 from agents.orchestrator import analyze_lease
 from schemas.lease_schema import LeaseAnalysis
@@ -47,6 +54,16 @@ ALLOWED_MIME_TYPES = {
     "application/x-pdf",
 }
 MAX_RAW_TEXT_CHARS = 100_000
+NORMS_FILE_PATH = Path(__file__).parent / "data" / "market_norms.json"
+
+
+@lru_cache(maxsize=1)
+def _load_cached_market_norms() -> dict:
+    """Load and cache regional market baselines into memory once."""
+    if not NORMS_FILE_PATH.exists():
+        raise FileNotFoundError("Market norms dataset not found.")
+    with open(NORMS_FILE_PATH, encoding="utf-8") as f:
+        return json.load(f)
 
 
 class TextAnalysisRequest(BaseModel):
@@ -86,6 +103,11 @@ async def lifespan(app: FastAPI):
     logger.info("LeaseLens backend shutting down cleanly.")
 
 
+is_production = os.getenv("ENVIRONMENT", "").lower() == "production" or os.getenv("RENDER", "").lower() == "true"
+docs_url = None if is_production else "/docs"
+redoc_url = None if is_production else "/redoc"
+openapi_url = None if is_production else "/openapi.json"
+
 app = FastAPI(
     title="LeaseLens API",
     description=(
@@ -95,12 +117,21 @@ app = FastAPI(
     ),
     version="1.1.0",
     lifespan=lifespan,
+    docs_url=docs_url,
+    redoc_url=redoc_url,
+    openapi_url=openapi_url,
 )
+
+# Rate limiter setup (prevents DoS and API quota exhaustion)
+limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # GZip compression for all responses > 500 bytes (~60-70% reduction)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
-# CORS configuration supporting local development and dynamic Vercel deployments
+# CORS configuration: restricted allow_headers for defense-in-depth
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -113,8 +144,22 @@ app.add_middleware(
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "Accept", "Authorization", "X-Requested-With", "X-Request-ID"],
 )
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Enforce OWASP defense-in-depth security response headers."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none'"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    return response
 
 
 @app.middleware("http")
@@ -215,9 +260,11 @@ async def _read_and_validate_pdf_upload(file: UploadFile) -> bytes:
     summary="Analyze Residential Lease Agreement",
     tags=["Analysis"],
 )
+@limiter.limit("30/minute")
 async def analyze_lease_endpoint(
-    file: Optional[UploadFile] = File(default=None, description="PDF lease document"),
-    raw_text: Optional[str] = Form(default=None, description="Raw lease text"),
+    request: Request,
+    file: UploadFile | None = File(default=None, description="PDF lease document"),
+    raw_text: str | None = Form(default=None, description="Raw lease text"),
 ):
     """Analyze a residential lease agreement for variance against market norms.
 
@@ -235,14 +282,15 @@ async def analyze_lease_endpoint(
             detail="Invalid request: Provide either a PDF file upload or raw lease text.",
         )
 
-    pdf_bytes: Optional[bytes] = None
-    sanitized_text: Optional[str] = None
+    pdf_bytes: bytes | None = None
+    sanitized_text: str | None = None
 
     if file:
         pdf_bytes = await _read_and_validate_pdf_upload(file)
+        safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", file.filename or "upload.pdf")[:100]
         logger.info(
             "Validated PDF upload '%s' (%d bytes, verified %s)",
-            file.filename,
+            safe_name,
             len(pdf_bytes),
             file.content_type,
         )
@@ -270,19 +318,19 @@ async def analyze_lease_endpoint(
 
     except ValueError as e:
         logger.warning("Validation error in analysis pipeline: %s", e)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except RuntimeError as e:
         logger.error("Pipeline runtime error: %s", e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Multi-agent analysis pipeline encountered an upstream error.",
-        )
+        ) from e
     except Exception as e:
         logger.error("Unexpected error in lease analysis: %s", e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while analyzing the document.",
-        )
+        ) from e
 
 
 @app.post(
@@ -291,7 +339,8 @@ async def analyze_lease_endpoint(
     summary="Analyze Raw Text Lease via JSON Body",
     tags=["Analysis"],
 )
-async def analyze_lease_json_endpoint(payload: TextAnalysisRequest):
+@limiter.limit("30/minute")
+async def analyze_lease_json_endpoint(request: Request, payload: TextAnalysisRequest):
     """Analyze raw lease text submitted as a strictly validated JSON payload."""
     try:
         result = await analyze_lease(
@@ -300,36 +349,37 @@ async def analyze_lease_json_endpoint(payload: TextAnalysisRequest):
         )
         return result
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
         logger.error("Unexpected error in JSON lease analysis: %s", e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while analyzing the document.",
-        )
+        ) from e
 
 
 @app.get("/api/market-norms", tags=["Data"])
 async def get_market_norms():
     """Return empirical regional lease market baselines used for variance calculation."""
-    import json
-    from pathlib import Path
-
-    norms_path = Path(__file__).parent / "data" / "market_norms.json"
-    if not norms_path.exists():
+    try:
+        norms_data = _load_cached_market_norms()
+        return JSONResponse(
+            content=norms_data,
+            headers={
+                "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+            },
+        )
+    except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Market norms dataset not found.",
-        )
-    try:
-        with open(norms_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        ) from None
     except Exception as e:
         logger.error("Error reading market norms: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to load market norms repository.",
-        )
+        ) from e
 
 
 if __name__ == "__main__":
@@ -340,6 +390,6 @@ if __name__ == "__main__":
         "main:app",
         host="0.0.0.0",
         port=server_port,
-        reload=False if os.getenv("RENDER") else True,
+        reload=not bool(os.getenv("RENDER")),
         log_level="info",
     )

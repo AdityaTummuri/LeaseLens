@@ -8,7 +8,6 @@ frontend compatibility.
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -54,7 +53,7 @@ class ClauseRisk(BaseModel):
             "e.g., 'Standard security deposit: 2 months rent'."
         ),
     )
-    deviation_percentage: Optional[float] = Field(
+    deviation_percentage: float | None = Field(
         default=None,
         description=(
             "Quantified deviation from market standard as a percentage. "
@@ -89,7 +88,7 @@ class LeaseAnalysis(BaseModel):
         description="Total number of clauses identified and analyzed.",
         ge=0,
     )
-    risks: List[ClauseRisk] = Field(
+    risks: list[ClauseRisk] = Field(
         default_factory=list,
         description="List of extracted clauses with risk assessments.",
     )

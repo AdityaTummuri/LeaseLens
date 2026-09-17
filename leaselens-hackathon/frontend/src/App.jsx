@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import LegalDisclaimer from './components/LegalDisclaimer';
 import FileUpload from './components/FileUpload';
 import HeatmapView from './components/HeatmapView';
@@ -16,8 +16,21 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('upload'); // 'upload' | 'results'
 
   const coldStartTimerRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
   const handleAnalyze = useCallback(async ({ file, rawText }) => {
+    // Abort any prior in-flight request to save network bandwidth and avoid race conditions
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    // Timeout signal after 120 seconds to prevent hanging requests
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 120000);
+
     setLoading(true);
     setIsColdStarting(false);
     setError(null);
@@ -39,6 +52,7 @@ export default function App() {
       const response = await fetch(API_URL, {
         method: 'POST',
         body: formData,
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -52,11 +66,16 @@ export default function App() {
       setAnalysis(data);
       setActiveTab('results');
     } catch (err) {
-      setError(
-        err.message ||
-          'Failed to connect to LeaseLens backend. If using Render free-tier, the server may take ~50s to wake up from idle.'
-      );
+      if (err.name === 'AbortError') {
+        setError('Analysis request was cancelled or timed out. Please try again.');
+      } else {
+        setError(
+          err.message ||
+            'Failed to connect to LeaseLens backend. If using Render free-tier, the server may take ~50s to wake up from idle.'
+        );
+      }
     } finally {
+      clearTimeout(timeoutId);
       if (coldStartTimerRef.current) {
         clearTimeout(coldStartTimerRef.current);
       }
@@ -66,10 +85,25 @@ export default function App() {
   }, []);
 
   const handleReset = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
     setAnalysis(null);
     setError(null);
     setIsColdStarting(false);
     setActiveTab('upload');
+  }, []);
+
+  // Cleanup in-flight requests and timers on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (coldStartTimerRef.current) {
+        clearTimeout(coldStartTimerRef.current);
+      }
+    };
   }, []);
 
   return (

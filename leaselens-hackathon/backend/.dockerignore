@@ -14,3 +14,6 @@ Dockerfile
 .dockerignore
 deploy_cloud_run.sh
 test_*.py
+conftest.py
+requirements-dev.txt
+*.md

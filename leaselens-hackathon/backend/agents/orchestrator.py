@@ -13,12 +13,11 @@ Implements automatic retry loops for schema validation failures.
 
 import logging
 import time
-from typing import List, Optional
 
-from schemas.lease_schema import LeaseAnalysis
-from agents.ingestion import extract_text_from_pdf, extract_text_from_raw
 from agents.classifier import classify_lease_text
+from agents.ingestion import extract_text_from_pdf, extract_text_from_raw
 from agents.upl_guardrail import sanitize_analysis
+from schemas.lease_schema import LeaseAnalysis
 
 logger = logging.getLogger("leaselens.orchestrator")
 
@@ -29,7 +28,7 @@ MAX_RETRIES = 3         # retry count for schema validation failures
 CHARS_PER_TOKEN = 4     # rough approximation for chunking
 
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
+def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
     """Split text into overlapping sliding windows.
 
     Uses character-based approximation (4 chars ≈ 1 token) to create
@@ -65,8 +64,8 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
 
 
 async def analyze_lease(
-    pdf_bytes: Optional[bytes] = None,
-    raw_text: Optional[str] = None,
+    pdf_bytes: bytes | None = None,
+    raw_text: str | None = None,
 ) -> LeaseAnalysis:
     """Execute the full LeaseLens analysis pipeline.
 
@@ -93,8 +92,8 @@ async def analyze_lease(
     # --- Step 1: Document Ingestion ---
     logger.info("Step 1/3: Document Ingestion — extracting text...")
     stage_start = time.perf_counter()
-    
-    last_error: Optional[Exception] = None
+
+    last_error: Exception | None = None
     normalized_text = ""
 
     for attempt in range(MAX_RETRIES):
@@ -135,7 +134,7 @@ async def analyze_lease(
     chunks = chunk_text(normalized_text)
     logger.info("Document split into %d overlapping chunks.", len(chunks))
 
-    analysis: Optional[LeaseAnalysis] = None
+    analysis: LeaseAnalysis | None = None
 
     for attempt in range(MAX_RETRIES):
         try:

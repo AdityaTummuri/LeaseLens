@@ -26,13 +26,11 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).parent))
 
 from agents.upl_guardrail import (
-    FORBIDDEN_PATTERN,
     _ensure_disclaimer_suffix,
     _rule_based_sanitize,
     check_for_violations,
 )
 from main import MAX_FILE_SIZE_BYTES, app
-from schemas.lease_schema import ClauseCategory, ClauseRisk, LeaseAnalysis, RiskLevel
 
 client = TestClient(app)
 

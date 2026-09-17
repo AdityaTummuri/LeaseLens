@@ -9,11 +9,10 @@ Configured with read-only CapabilitiesConfig to prevent arbitrary execution.
 
 import os
 import re
-from typing import Optional
 
 try:
     from google.antigravity import Agent, LocalAgentConfig
-    from google.antigravity.types import CapabilitiesConfig, BuiltinTools
+    from google.antigravity.types import BuiltinTools, CapabilitiesConfig
 except ImportError:
     Agent = None
     LocalAgentConfig = None
@@ -21,10 +20,10 @@ except ImportError:
     BuiltinTools = None
 
 try:
-    from schemas.lease_schema import LeaseAnalysis, ClauseRisk
+    from schemas.lease_schema import ClauseRisk, LeaseAnalysis
 except ImportError:
     try:
-        from backend.schemas.lease_schema import LeaseAnalysis, ClauseRisk
+        from backend.schemas.lease_schema import ClauseRisk, LeaseAnalysis
     except ImportError:
         LeaseAnalysis = None
         ClauseRisk = None
@@ -58,7 +57,7 @@ FORBIDDEN_PATTERN = re.compile(
 UPL_SYSTEM_PROMPT = """You are the UPL Guardrail Agent for the LeaseLens pipeline.
 
 YOUR SOLE RESPONSIBILITY:
-Review and sanitize the provided lease analysis JSON to ensure ABSOLUTE COMPLIANCE 
+Review and sanitize the provided lease analysis JSON to ensure ABSOLUTE COMPLIANCE
 with Unauthorized Practice of Law (UPL) regulations.
 
 SANITIZATION RULES:
@@ -179,7 +178,7 @@ async def sanitize_analysis(analysis: LeaseAnalysis) -> LeaseAnalysis:
     return partially_sanitized
 
 
-def check_for_violations(text: str) -> Optional[str]:
+def check_for_violations(text: str) -> str | None:
     """Check if text contains UPL-violating language.
 
     Args:

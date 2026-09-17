@@ -91,11 +91,13 @@ gcloud run deploy "${SERVICE_NAME}" \
     --allow-unauthenticated \
     --region "${REGION}" \
     --project="${PROJECT_ID}" \
-    --set-env-vars="PORT=8000" \
+    --set-env-vars="PORT=8000,ENVIRONMENT=production" \
     --memory 1Gi \
     --cpu 1 \
     --min-instances 0 \
-    --max-instances 5
+    --max-instances 5 \
+    --concurrency 80 \
+    --timeout 120s
 
 echo -e "${GREEN}✅ Deployment to Google Cloud Run complete.${RESET}"
 echo ""

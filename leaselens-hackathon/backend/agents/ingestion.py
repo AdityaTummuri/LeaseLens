@@ -10,13 +10,13 @@ Security: Configured with read-only CapabilitiesConfig to prevent arbitrary exec
 import base64
 import logging
 import os
-from typing import Optional
+import re
 
 logger = logging.getLogger("leaselens.ingestion")
 
 try:
     from google.antigravity import Agent, LocalAgentConfig
-    from google.antigravity.types import CapabilitiesConfig, BuiltinTools
+    from google.antigravity.types import BuiltinTools, CapabilitiesConfig
 except ImportError:
     Agent = None
     LocalAgentConfig = None
@@ -114,6 +114,16 @@ async def extract_text_from_raw(raw_text: str) -> str:
     Returns:
         Cleaned and structured markdown text.
     """
+    # Fast-path: if raw text already has clear markdown or numbered clauses with paragraphs,
+    # normalize whitespace directly without redundant LLM latency/quota consumption
+    has_markdown_headers = "##" in raw_text or "# " in raw_text
+    has_numbered_clauses = bool(re.search(r"^\s*\d+[\.\)]\s+[A-Za-z]", raw_text, re.MULTILINE))
+    has_paragraphs = "\n\n" in raw_text and len(raw_text.splitlines()) >= 3
+
+    if (has_markdown_headers or has_numbered_clauses) and has_paragraphs:
+        lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+        return "\n\n".join(lines)
+
     config = create_ingestion_agent_config()
 
     if config and Agent and os.getenv("GEMINI_API_KEY"):

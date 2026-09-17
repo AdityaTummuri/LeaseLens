@@ -13,20 +13,19 @@ import os
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional
 
 logger = logging.getLogger("leaselens.classifier")
 
 try:
     from google.antigravity import Agent, LocalAgentConfig
-    from google.antigravity.types import CapabilitiesConfig, BuiltinTools
+    from google.antigravity.types import BuiltinTools, CapabilitiesConfig
 except ImportError:
     Agent = None
     LocalAgentConfig = None
     CapabilitiesConfig = None
     BuiltinTools = None
 
-from schemas.lease_schema import ClauseCategory, ClauseRisk, LeaseAnalysis, RiskLevel
+from schemas.lease_schema import ClauseCategory, ClauseRisk, LeaseAnalysis, RiskLevel  # noqa: E402
 
 # Load market norms at module level
 _NORMS_PATH = Path(__file__).parent.parent / "data" / "market_norms.json"
@@ -35,7 +34,7 @@ _NORMS_PATH = Path(__file__).parent.parent / "data" / "market_norms.json"
 @lru_cache(maxsize=1)
 def _load_market_norms() -> dict:
     """Load and cache regional market baselines from JSON (read once, cached in memory)."""
-    with open(_NORMS_PATH, "r", encoding="utf-8") as f:
+    with open(_NORMS_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -97,9 +96,9 @@ def create_classifier_agent_config(market_norms: dict):
     )
 
 
-def _heuristic_classify_clauses(text: str, market_norms: dict) -> List[ClauseRisk]:
+def _heuristic_classify_clauses(text: str, market_norms: dict) -> list[ClauseRisk]:
     """Deterministic fallback classification against empirical market baselines."""
-    risks: List[ClauseRisk] = []
+    risks: list[ClauseRisk] = []
     text_lower = text.lower()
 
     # Rule 1: Security Deposit
@@ -180,7 +179,7 @@ def _heuristic_classify_clauses(text: str, market_norms: dict) -> List[ClauseRis
 
 async def classify_lease_text(
     normalized_text: str,
-    chunks: List[str],
+    chunks: list[str],
 ) -> LeaseAnalysis:
     """Classify lease clauses from chunked text segments.
 
@@ -194,7 +193,7 @@ async def classify_lease_text(
     market_norms = _load_market_norms()
     config = create_classifier_agent_config(market_norms)
 
-    all_risks: List[ClauseRisk] = []
+    all_risks: list[ClauseRisk] = []
     document_summary = ""
 
     if config and Agent and os.getenv("GEMINI_API_KEY"):
@@ -215,24 +214,34 @@ async def classify_lease_text(
                     for risk_data in initial_result.get("risks", []):
                         all_risks.append(ClauseRisk(**risk_data))
 
-                # Process each chunk for additional clauses
-                for i, chunk in enumerate(chunks):
-                    chunk_prompt = (
-                        f"Analyze chunk {i + 1}/{len(chunks)} of the lease agreement. "
-                        f"Extract any clause risks NOT already identified.\n\n"
-                        f"Previously identified categories: "
-                        f"{[r.category.value for r in all_risks]}\n\n"
-                        f"Text chunk:\n{chunk}"
-                    )
-                    response = await agent.chat(chunk_prompt)
-                    chunk_result = await response.structured_output()
+                existing_cats = {r.category for r in all_risks}
+                all_categories_count = len(ClauseCategory)
 
-                    if chunk_result:
-                        for risk_data in chunk_result.get("risks", []):
-                            clause = ClauseRisk(**risk_data)
-                            existing_cats = {r.category for r in all_risks}
-                            if clause.category not in existing_cats:
-                                all_risks.append(clause)
+                # If document spans multiple chunks and more categories can be extracted
+                if len(chunks) > 1 and len(existing_cats) < all_categories_count:
+                    # Chunk 1 was already encompassed in the initial 8000 char window
+                    remaining_chunks = chunks[1:]
+                    for i, chunk in enumerate(remaining_chunks, start=2):
+                        if len(existing_cats) >= all_categories_count:
+                            logger.info("All CUAD clause categories identified; terminating chunk analysis early.")
+                            break
+
+                        chunk_prompt = (
+                            f"Analyze chunk {i}/{len(chunks)} of the lease agreement. "
+                            f"Extract any clause risks NOT already identified.\n\n"
+                            f"Previously identified categories: "
+                            f"{[r.category.value for r in all_risks]}\n\n"
+                            f"Text chunk:\n{chunk}"
+                        )
+                        response = await agent.chat(chunk_prompt)
+                        chunk_result = await response.structured_output()
+
+                        if chunk_result:
+                            for risk_data in chunk_result.get("risks", []):
+                                clause = ClauseRisk(**risk_data)
+                                if clause.category not in existing_cats:
+                                    all_risks.append(clause)
+                                    existing_cats.add(clause.category)
         except Exception as e:
             logger.warning("Antigravity agent classification error: %s, using fallback", e)
 

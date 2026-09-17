@@ -34,6 +34,7 @@ ignore = [
     "E501",   # line too long (handled by formatter)
     "B008",   # do not perform function call in argument defaults (FastAPI uses this)
     "SIM108", # ternary operator suggestion
+    "UP042",  # str, Enum inheritance preserved for Pydantic v2 cross-version compatibility
 ]
 
 [tool.ruff.lint.isort]
