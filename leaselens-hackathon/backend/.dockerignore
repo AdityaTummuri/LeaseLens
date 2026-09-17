@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.env
+.env.*
+.git
+.gitignore
+.vscode
+.idea
+Dockerfile
+.dockerignore
+deploy_cloud_run.sh
+test_*.py

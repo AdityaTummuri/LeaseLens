@@ -9,6 +9,7 @@ Security: Configured with read-only CapabilitiesConfig to prevent arbitrary exec
 
 import base64
 import logging
+import os
 from typing import Optional
 
 logger = logging.getLogger("leaselens.ingestion")
@@ -65,21 +66,24 @@ async def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """
     config = create_ingestion_agent_config()
 
-    if config and Agent:
-        pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
-        prompt = (
-            "Extract all text from the following residential lease agreement PDF. "
-            "Preserve exact clause wording and structure."
-        )
-        async with Agent(config) as agent:
-            response = await agent.chat(
-                prompt,
-                attachments=[{
-                    "mime_type": "application/pdf",
-                    "data": pdf_b64,
-                }],
+    if config and Agent and os.getenv("GEMINI_API_KEY"):
+        try:
+            pdf_b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+            prompt = (
+                "Extract all text from the following residential lease agreement PDF. "
+                "Preserve exact clause wording and structure."
             )
-            return await response.text()
+            async with Agent(config) as agent:
+                response = await agent.chat(
+                    prompt,
+                    attachments=[{
+                        "mime_type": "application/pdf",
+                        "data": pdf_b64,
+                    }],
+                )
+                return await response.text()
+        except Exception as e:
+            logger.warning("Antigravity ingestion agent encountered: %s; using fallback", e)
 
     # Fallback for offline / non-SDK test environments: decode text-based PDF bytes
     try:
@@ -112,16 +116,19 @@ async def extract_text_from_raw(raw_text: str) -> str:
     """
     config = create_ingestion_agent_config()
 
-    if config and Agent:
-        prompt = (
-            "The following is raw text from a residential lease agreement. "
-            "Clean it up into well-structured markdown, preserving exact "
-            "clause wording. Remove any formatting artifacts.\n\n"
-            f"{raw_text}"
-        )
-        async with Agent(config) as agent:
-            response = await agent.chat(prompt)
-            return await response.text()
+    if config and Agent and os.getenv("GEMINI_API_KEY"):
+        try:
+            prompt = (
+                "The following is raw text from a residential lease agreement. "
+                "Clean it up into well-structured markdown, preserving exact "
+                "clause wording. Remove any formatting artifacts.\n\n"
+                f"{raw_text}"
+            )
+            async with Agent(config) as agent:
+                response = await agent.chat(prompt)
+                return await response.text()
+        except Exception as e:
+            logger.warning("Antigravity raw ingestion agent encountered: %s; using fallback", e)
 
     # Direct normalization fallback
     lines = [line.strip() for line in raw_text.splitlines() if line.strip()]

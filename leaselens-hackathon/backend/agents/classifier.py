@@ -9,6 +9,7 @@ Security: Configured with read-only CapabilitiesConfig to prevent arbitrary exec
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import List, Optional
@@ -194,7 +195,7 @@ async def classify_lease_text(
     all_risks: List[ClauseRisk] = []
     document_summary = ""
 
-    if config and Agent:
+    if config and Agent and os.getenv("GEMINI_API_KEY"):
         try:
             async with Agent(config) as agent:
                 # First pass: get document summary from full text

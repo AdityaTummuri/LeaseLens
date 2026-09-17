@@ -7,6 +7,7 @@ phrasing and strips any language that could constitute legal advice.
 Configured with read-only CapabilitiesConfig to prevent arbitrary execution.
 """
 
+import os
 import re
 from typing import Optional
 
@@ -156,24 +157,24 @@ async def sanitize_analysis(analysis: LeaseAnalysis) -> LeaseAnalysis:
     })
 
     # --- Layer 2: LLM semantic sanitization ---
-    config = create_upl_agent_config()
+    if Agent and os.getenv("GEMINI_API_KEY"):
+        config = create_upl_agent_config()
+        try:
+            async with Agent(config) as agent:
+                prompt = (
+                    "Review and sanitize this lease analysis for UPL compliance. "
+                    "Ensure NO educational_note contains legal advice, directives, "
+                    "or forbidden terminology.\n\n"
+                    f"{partially_sanitized.model_dump_json(indent=2)}"
+                )
+                response = await agent.chat(prompt)
+                result = await response.structured_output()
 
-    try:
-        async with Agent(config) as agent:
-            prompt = (
-                "Review and sanitize this lease analysis for UPL compliance. "
-                "Ensure NO educational_note contains legal advice, directives, "
-                "or forbidden terminology.\n\n"
-                f"{partially_sanitized.model_dump_json(indent=2)}"
-            )
-            response = await agent.chat(prompt)
-            result = await response.structured_output()
-
-            if result:
-                return LeaseAnalysis(**result)
-    except Exception:
-        # If LLM layer fails, the regex layer already sanitized
-        pass
+                if result:
+                    return LeaseAnalysis(**result)
+        except Exception:
+            # If LLM layer fails, the regex layer already sanitized
+            pass
 
     return partially_sanitized
 
