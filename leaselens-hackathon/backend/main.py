@@ -94,7 +94,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS configuration restricted to authorized frontend origins
+# CORS configuration supporting local development and dynamic Vercel deployments
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -102,16 +102,24 @@ app.add_middleware(
         "http://localhost:4173",  # Vite preview
         "http://localhost:3000",
         "http://127.0.0.1:5173",
+        "https://leaselens.vercel.app",
     ],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Accept"],
+    allow_headers=["*"],
 )
+
+
+@app.get("/", tags=["System"])
+async def root_health_check():
+    """Lightweight root health check endpoint for Render service monitoring."""
+    return {"status": "online", "service": "LeaseLens Backend"}
 
 
 @app.get("/api/health", tags=["System"])
 async def health_check():
-    """Health check endpoint confirming API availability and UPL guardrail status."""
+    """Detailed health check endpoint confirming API availability and UPL guardrail status."""
     return {
         "status": "healthy",
         "service": "leaselens",
@@ -301,10 +309,11 @@ async def get_market_norms():
 if __name__ == "__main__":
     import uvicorn
 
+    server_port = int(os.getenv("PORT", 8000))
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,
+        port=server_port,
+        reload=False if os.getenv("RENDER") else True,
         log_level="info",
     )

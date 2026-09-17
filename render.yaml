@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: leaselens-backend
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r leaselens-hackathon/backend/requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PYTHONPATH
+        value: ./leaselens-hackathon/backend

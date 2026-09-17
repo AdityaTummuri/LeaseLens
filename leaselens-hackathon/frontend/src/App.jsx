@@ -1,24 +1,32 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import LegalDisclaimer from './components/LegalDisclaimer';
 import FileUpload from './components/FileUpload';
 import HeatmapView from './components/HeatmapView';
 import LoadingSpinner from './components/LoadingSpinner';
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL ||
-  'https://leaselens-backend-856255401692.us-central1.run.app';
+  import.meta.env.VITE_API_URL || 'https://leaselens-backend.onrender.com';
 const API_URL = `${API_BASE_URL}/api/analyze-lease`;
 
 export default function App() {
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [isColdStarting, setIsColdStarting] = useState(false);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('upload'); // 'upload' | 'results'
 
+  const coldStartTimerRef = useRef(null);
+
   const handleAnalyze = useCallback(async ({ file, rawText }) => {
     setLoading(true);
+    setIsColdStarting(false);
     setError(null);
     setAnalysis(null);
+
+    // Render free-tier cold-start detector (> 3 seconds)
+    coldStartTimerRef.current = setTimeout(() => {
+      setIsColdStarting(true);
+    }, 3000);
 
     try {
       const formData = new FormData();
@@ -35,22 +43,32 @@ export default function App() {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.detail || `Server error: ${response.status}`);
+        throw new Error(
+          errData.detail || `Server returned error status: ${response.status}`
+        );
       }
 
       const data = await response.json();
       setAnalysis(data);
       setActiveTab('results');
     } catch (err) {
-      setError(err.message || 'An unexpected error occurred.');
+      setError(
+        err.message ||
+          'Failed to connect to LeaseLens backend. If using Render free-tier, the server may take ~50s to wake up from idle.'
+      );
     } finally {
+      if (coldStartTimerRef.current) {
+        clearTimeout(coldStartTimerRef.current);
+      }
       setLoading(false);
+      setIsColdStarting(false);
     }
   }, []);
 
   const handleReset = useCallback(() => {
     setAnalysis(null);
     setError(null);
+    setIsColdStarting(false);
     setActiveTab('upload');
   }, []);
 
@@ -91,7 +109,7 @@ export default function App() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
         {loading ? (
-          <LoadingSpinner />
+          <LoadingSpinner isColdStarting={isColdStarting} />
         ) : analysis ? (
           <HeatmapView analysis={analysis} />
         ) : (

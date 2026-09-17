@@ -131,6 +131,15 @@ def test_clean_informational_text_remains_unaltered():
 # =====================================================================
 
 
+def test_root_health_endpoint():
+    """Verify root health check returns 200 for Render uptime monitors."""
+    response = client.get("/")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "online"
+    assert data["service"] == "LeaseLens Backend"
+
+
 def test_api_health_endpoint():
     """Verify health endpoint returns 200 and confirms active UPL guardrail status."""
     response = client.get("/api/health")

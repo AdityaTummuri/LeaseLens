@@ -7,7 +7,7 @@ const STEPS = [
   { label: 'Generating risk heatmap...', icon: '🎨', duration: 3000 },
 ];
 
-export default function LoadingSpinner() {
+export default function LoadingSpinner({ isColdStarting = false }) {
   const [currentStep, setCurrentStep] = useState(0);
 
   useEffect(() => {
@@ -20,7 +20,11 @@ export default function LoadingSpinner() {
   }, [currentStep]);
 
   return (
-    <div className="max-w-md mx-auto py-20 text-center animate-fade-in">
+    <div
+      role="region"
+      aria-label="Analysis in Progress"
+      className="max-w-md mx-auto py-16 text-center animate-fade-in"
+    >
       {/* Spinning Lens */}
       <div className="relative w-24 h-24 mx-auto mb-8">
         <div className="absolute inset-0 rounded-full border-4 border-surface-elevated" />
@@ -36,9 +40,28 @@ export default function LoadingSpinner() {
       <h3 className="text-white font-semibold text-lg mb-2">
         Analyzing Your Lease
       </h3>
-      <p className="text-gray-400 text-sm mb-8">
+      <p className="text-gray-400 text-sm mb-6">
         {STEPS[currentStep].label}
       </p>
+
+      {/* Render Free-Tier Cold Start Notice */}
+      {isColdStarting && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mb-8 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 
+                     text-amber-300 text-xs leading-relaxed max-w-sm mx-auto animate-fade-in text-left"
+        >
+          <div className="flex items-center gap-2 font-semibold mb-1 text-amber-200">
+            <span>⚡</span>
+            <span>Render Free-Tier Server Spinning Up</span>
+          </div>
+          <p className="text-[11px] text-amber-300/90">
+            The backend is spinning up from its idle state. This initial cold-start takes
+            ~30–50 seconds, after which subsequent requests are instantaneous.
+          </p>
+        </div>
+      )}
 
       {/* Progress Steps */}
       <div className="flex flex-col gap-3 text-left max-w-xs mx-auto">
